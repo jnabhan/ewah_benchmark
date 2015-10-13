@@ -1,3 +1,7 @@
 benchmark/Debug/
 benchmark/Release/
+
+java_benchmark/target/
+
 .gitignore~
+*~
