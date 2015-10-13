@@ -6,7 +6,7 @@ from ./benchmark<br/>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;make<br/>
 
 ##To run the benchmarks##
-from ./benchmark/Release<br/>
+from ./benchmark/Release (necessary because of hard-coded path for bitmaps)<br/>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;./test/ewah_test<br/>
 
 ##dump_files##
