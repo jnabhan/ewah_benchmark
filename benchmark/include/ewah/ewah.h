@@ -28,6 +28,7 @@ class BitmapStatistics;
 template<class uword>
 class EWAHBoolArrayRawIterator;
 
+
 /**
  * This class is a compressed bitmap.
  * This is where compression
@@ -123,6 +124,11 @@ public:
     /**
      * Make sure the two bitmaps have the same size (padding with zeroes
      * if necessary). It has constant running time complexity.
+     *
+     * This is useful when calling "logicalnot" functions.
+     *
+     * This can an adverse effect of performance, especially when computing
+     * intersections.
      */
     void makeSameSize(EWAHBoolArray & a) {
         if (a.sizeinbits < sizeinbits)
@@ -170,14 +176,14 @@ public:
      * Running time complexity is proportional to the sum of the compressed
      * bitmap sizes.
      */
-    void logicaland(EWAHBoolArray &a, EWAHBoolArray &container);
+    void logicaland(const EWAHBoolArray &a, EWAHBoolArray &container) const;
 
     /**
      * tests whether the bitmaps "intersect" (have at least one 1-bit at the same
      * position). This function does not modify the existing bitmaps.
      * It is faster than calling logicaland.
      */
-    bool intersects(EWAHBoolArray &a);
+    bool intersects(const EWAHBoolArray &a) const;
 
     /**
      * computes the logical or with another compressed bitmap
@@ -185,7 +191,7 @@ public:
      * Running time complexity is proportional to the sum of the compressed
      * bitmap sizes.
      */
-    void logicalor(EWAHBoolArray &a, EWAHBoolArray &container);
+    void logicalor(const EWAHBoolArray &a, EWAHBoolArray &container) const;
 
 
     /**
@@ -194,7 +200,7 @@ public:
      * Running time complexity is proportional to the sum of the compressed
      * bitmap sizes.
      */
-    void logicalxor(EWAHBoolArray &a, EWAHBoolArray &container);
+    void logicalxor(const EWAHBoolArray &a, EWAHBoolArray &container) const;
 
     /**
      * clear the content of the bitmap. It does not
@@ -227,18 +233,13 @@ public:
     /**
      * Return the size in bits of this bitmap (this refers
      * to the uncompressed size in bits).
+     *
+     * You can increase it with padWithZeroes()
      */
     inline size_t sizeInBits() const {
         return sizeinbits;
     }
 
-    /**
-     * set size in bits. This does not affect the compressed size. It
-     * runs in constant time.
-     */
-    inline void setSizeInBits(const size_t size) {
-        sizeinbits = size;
-    }
 
     /**
      * Return the size of the buffer in bytes. This
@@ -260,11 +261,22 @@ public:
      */
     size_t addStreamOfDirtyWords(const uword * v, const size_t number);
 
+    /**
+     * add a stream of dirty words, each one negated, returns the number of words added
+     * (storage cost increase)
+     */
+    size_t addStreamOfNegatedDirtyWords(const uword * v, const size_t number);
 
 
     /**
      * make sure the size of the array is totalbits bits by padding with zeroes.
-     * returns the number of words added (storage cost increase)
+     * returns the number of words added (storage cost increase).
+     *
+     * This is useful when calling "logicalnot" functions.
+     *
+     * This can an adverse effect of performance, especially when computing
+     * intersections.
+     *
      */
     size_t padWithZeroes(const size_t totalbits);
 
@@ -313,8 +325,17 @@ public:
      */
     void readBuffer(istream & in, const size_t buffersize);
 
+
+    /**
+     * We define two EWAHBoolArray as being equal if they have the same set bits.
+     * Alternatively, B1==B2 if and only if cardinality(B1 XOR B2) ==0.
+     */
     bool operator==(const EWAHBoolArray & x) const;
 
+    /**
+     * We define two EWAHBoolArray as being different if they do not have the same set bits.
+     * Alternatively, B1!=B2 if and only if cardinality(B1 XOR B2) >0.
+     */
     bool operator!=(const EWAHBoolArray & x) const;
 
     bool operator==(const BoolArray<uword> & x) const;
@@ -402,7 +423,6 @@ public:
     EWAHBoolArray(const EWAHBoolArray& other) :
         buffer(other.buffer), sizeinbits(other.sizeinbits),
                 lastRLW(other.lastRLW) {
-        //ASSERT(buffer.size()<=1,"You are trying to copy the bitmap, a terrible idea in general, for performance reasons.");// performance assert!
     }
 
     /**
@@ -431,6 +451,9 @@ public:
 
     /**
      * Write the logical not of this bitmap in the provided container.
+     *
+     * This function takes into account the sizeInBits value.
+     * You may need to call "padWithZeroes" to adjust the sizeInBits.
      */
     void logicalnot(EWAHBoolArray & x) const;
 
@@ -438,9 +461,20 @@ public:
      * Apply the logical not operation on this bitmap.
      * Running time complexity is proportional to the compressed size of the bitmap.
      * The current bitmap is not modified.
-     */
+     *
+     * This function takes into account the sizeInBits value.
+     * You may need to call "padWithZeroes" to adjust the sizeInBits.
+     **/
     void inplace_logicalnot();
 
+    /**
+     * set size in bits. This does not affect the compressed size. It
+     * runs in constant time. This should not normally be used, except 
+     * as part of a deserialization process.
+     */
+    inline void setSizeInBits(const size_t size) {
+        sizeinbits = size;
+    }
 private:
 
     // addStreamOfEmptyWords but does not return the cost increase,
@@ -489,10 +523,14 @@ public:
             else
                 returnvalue = zero;
         } else {
+#ifdef EWAHASSERT
             assert(literalwords < lw);
+#endif
             ++literalwords;
             ++pointer;
+#ifdef EWAHASSERT
             assert(pointer < myparent.size());
+#endif
             returnvalue = myparent[pointer];
         }
         if ((compressedwords == rl) && (literalwords == lw)) {
@@ -807,12 +845,16 @@ void EWAHBoolArray<uword>::inplace_logicalnot() {
     }
     if(sizeinbits % wordinbits != 0){
         RunningLengthWord<uword> rlw(buffer[lastrlw]);
+#ifdef EWAHASSERT
         assert(rlw.getNumberOfLiteralWords() + rlw.getRunningLength() > 0);
+#endif
         const uword maskbogus = (static_cast<uword>(1) << (sizeinbits % wordinbits)) - 1;
         if(rlw.getNumberOfLiteralWords()>0) {// easy case
             buffer[lastrlw + 1 + rlw.getNumberOfLiteralWords() - 1 ] &= maskbogus;
         } else if(rlw.getRunningBit()) {
-            assert(rlw.getNumberOfLiteralWords() > 0);
+#ifdef EWAHASSERT
+        	assert(rlw.getNumberOfLiteralWords() > 0);
+#endif
             rlw.setNumberOfLiteralWords(rlw.getNumberOfLiteralWords() - 1);
             addLiteralWord(maskbogus);
         }
@@ -830,7 +872,9 @@ size_t EWAHBoolArray<uword>::numberOfOnes() const {
         }
         ++pointer;
         for (size_t k = 0; k < rlw.getNumberOfLiteralWords(); ++k) {
+#ifdef EWAHASSERT
             assert(countOnes(buffer[pointer]) < 64);
+#endif
             tot += countOnes(buffer[pointer]);
             ++pointer;
         }
@@ -884,7 +928,7 @@ void EWAHBoolArray<uword>::logicalnot(EWAHBoolArray & x) const {
     while (true) {
         BufferedRunningLengthWord<uword> & rlw = i.next();
         if (i.hasNext()) {
-            x.addStreamOfEmptyWords(!rlw.getRunningBit(),
+            if( rlw.getRunningLength()>0) x.fastaddStreamOfEmptyWords(!rlw.getRunningBit(),
                     rlw.getRunningLength());
             if (rlw.getNumberOfLiteralWords() > 0) {
                 const uword * dw = i.dirtyWords();
@@ -893,21 +937,23 @@ void EWAHBoolArray<uword>::logicalnot(EWAHBoolArray & x) const {
                 }
             }
         } else {
+#ifdef EWAHASSERT
             assert(rlw.getNumberOfLiteralWords() + rlw.getRunningLength() > 0);
+#endif
             if(rlw.getNumberOfLiteralWords() == 0) {
                 if((this->sizeinbits % wordinbits != 0) && !rlw.getRunningBit()) {
-                    x.addStreamOfEmptyWords(!rlw.getRunningBit(),
+                    if(rlw.getRunningLength()>1) x.fastaddStreamOfEmptyWords(!rlw.getRunningBit(),
                             rlw.getRunningLength() - 1);
                     const uword maskbogus = (static_cast<uword>(1) << (this->sizeinbits % wordinbits)) - 1;
                     x.addLiteralWord(maskbogus);
                     break;
                 } else {
-                    x.addStreamOfEmptyWords(!rlw.getRunningBit(),
+                    if(rlw.getRunningLength()>0) x.fastaddStreamOfEmptyWords(!rlw.getRunningBit(),
                             rlw.getRunningLength());
                     break;
                 }
             }
-            x.addStreamOfEmptyWords(!rlw.getRunningBit(),
+            if(rlw.getRunningLength()>0) x.fastaddStreamOfEmptyWords(!rlw.getRunningBit(),
                                 rlw.getRunningLength());
             const uword * dw = i.dirtyWords();
             for (size_t k = 0; k < rlw.getNumberOfLiteralWords()  - 1; ++k) {
@@ -990,7 +1036,9 @@ size_t EWAHBoolArray<uword>::addLiteralWord(const uword newdata) {
     }
     lastRunningLengthWord.setNumberOfLiteralWords(
             static_cast<uword> (numbersofar + 1));
+#ifdef EWAHASSERT
     assert(lastRunningLengthWord.getNumberOfLiteralWords() == numbersofar + 1);
+#endif
     buffer.push_back(newdata);
     return 1;
 }
@@ -998,7 +1046,6 @@ size_t EWAHBoolArray<uword>::addLiteralWord(const uword newdata) {
 template<class uword>
 size_t EWAHBoolArray<uword>::padWithZeroes(const size_t totalbits) {
 	size_t wordsadded = 0;
-    assert(totalbits >= sizeinbits);
 	if ( totalbits <= sizeinbits )
 		return wordsadded;
 
@@ -1033,9 +1080,10 @@ size_t EWAHBoolArray<uword>::padWithZeroes(const size_t totalbits) {
 
 		wordsadded = addStreamOfEmptyWords( false, wordstoadd );
 	}
-
+#ifdef EWAHASSERT
     assert(sizeinbits >= totalbits);
     assert(sizeinbits <= totalbits + wordinbits);
+#endif
     sizeinbits = totalbits;
     return wordsadded;
 }
@@ -1047,26 +1095,22 @@ size_t EWAHBoolArray<uword>::padWithZeroes(const size_t totalbits) {
 template<class uword = uint32_t>
 class EWAHBoolArrayRawIterator {
 public:
+
     EWAHBoolArrayRawIterator(const EWAHBoolArray<uword> & p) :
-        pointer(0), myparent(&p.getBuffer()), rlw((*myparent)[pointer]) { //RunningLength(0), NumberOfLiteralWords(0), Bit(0) {
-        if (verbose) {
-            cout << "created a new raw iterator over buffer of size  "
-                    << myparent->size() << endl;
-        }
+        pointer(0), myparent(&p.getBuffer()), rlw((*myparent)[pointer], this) {
     }
     EWAHBoolArrayRawIterator(const EWAHBoolArrayRawIterator & o) :
         pointer(o.pointer), myparent(o.myparent), rlw(o.rlw) {
     }
 
     bool hasNext() const {
-        if (verbose)
-            cout << "call to hasNext, pointer is at " << pointer
-                    << ", parent.size()= " << myparent->size() << endl;
         return pointer < myparent->size();
     }
 
     BufferedRunningLengthWord<uword> & next() {
+#ifdef EWAHASSERT
         assert(pointer < myparent->size());
+#endif
         rlw.read((*myparent)[pointer]);
         pointer = static_cast<size_t> (pointer + rlw.getNumberOfLiteralWords()
                 + 1);
@@ -1074,10 +1118,12 @@ public:
     }
 
     const uword * dirtyWords() const {
+#ifdef EWAHASSERT
         assert(pointer > 0);
         assert(pointer >= rlw.getNumberOfLiteralWords());
-        return &(myparent->at(
-                static_cast<size_t> (pointer - rlw.getNumberOfLiteralWords())));
+#endif
+        return myparent->data() +
+                static_cast<size_t> (pointer - rlw.getNumberOfLiteralWords());
     }
 
     EWAHBoolArrayRawIterator & operator=(const EWAHBoolArrayRawIterator & other) {
@@ -1087,13 +1133,9 @@ public:
         return *this;
     }
 
-    enum {
-        verbose = false
-    };
     size_t pointer;
     const vector<uword> * myparent;
     BufferedRunningLengthWord<uword> rlw;
-private:
 
     EWAHBoolArrayRawIterator();
 };
@@ -1108,17 +1150,127 @@ EWAHBoolArrayRawIterator<uword> EWAHBoolArray<uword>::raw_iterator() const {
     return EWAHBoolArrayRawIterator<uword> (*this);
 }
 
+
+#ifndef ALTEQUAL
+
 template<class uword>
-bool EWAHBoolArray<uword>::operator==(const EWAHBoolArray & x) const {
-    if (sizeinbits != x.sizeinbits)
-        return false;
-    if (buffer.size() != x.buffer.size())
-        return false;
-    for (size_t k = 0; k < buffer.size(); ++k)
-        if (buffer[k] != x.buffer[k])
-            return false;
+bool EWAHBoolArray<uword>::operator==(const EWAHBoolArray & a) const {
+    EWAHBoolArrayRawIterator<uword> i = a.raw_iterator();
+    EWAHBoolArrayRawIterator<uword> j = raw_iterator();
+    if (!(i.hasNext() and j.hasNext())) {// hopefully this never happens...
+        return true;
+    }
+    // at this point, this should be safe:
+    BufferedRunningLengthWord<uword> & rlwi = i.next();
+    BufferedRunningLengthWord<uword> & rlwj = j.next();
+    //RunningLength;
+    while (true) {
+        bool i_is_prey(rlwi.size() < rlwj.size());
+		BufferedRunningLengthWord<uword> & prey(i_is_prey ? rlwi : rlwj);
+		BufferedRunningLengthWord<uword> & predator(i_is_prey ? rlwj : rlwi);
+		uword predatorrl(predator.getRunningLength());
+		const uword preyrl(prey.getRunningLength());
+        if (predatorrl >= preyrl) {
+			const uword tobediscarded = preyrl;
+			if(tobediscarded)
+				if(prey.getRunningBit() ^ predator.getRunningBit())
+					return false;
+		} else {
+			const uword tobediscarded = predatorrl;
+			if(predatorrl>0) {
+				if(prey.getRunningBit() ^ predator.getRunningBit())
+					return false;
+			}
+			if (preyrl - tobediscarded > 0) {
+				return false;
+			}
+		}
+		predator.discardFirstWords(preyrl);
+		prey.discardFirstWords(preyrl);
+
+		predatorrl = predator.getRunningLength();
+		if (predatorrl > 0) {
+
+			const uword nbre_dirty_prey(prey.getNumberOfLiteralWords());
+			const uword tobediscarded =
+					(predatorrl >= nbre_dirty_prey) ? nbre_dirty_prey
+							: predatorrl;
+			if (tobediscarded > 0) {
+				return false;
+			}
+		}
+		// all that is left to do now is to AND the dirty words
+        uword nbre_dirty_prey(prey.getNumberOfLiteralWords());
+        if (nbre_dirty_prey > 0) {
+            const uword * idirty = i.dirtyWords();
+            const uword * jdirty = j.dirtyWords();
+
+            for (uword k = 0; k < nbre_dirty_prey; ++k) {
+                if((idirty[k] ^ jdirty[k])!=0) return false;
+            }
+            predator.discardFirstWords(nbre_dirty_prey);
+        }
+        if (i_is_prey) {
+            if (!i.hasNext())
+                break;
+            rlwi = i.next();
+        } else {
+            if (!j.hasNext())
+                break;
+            rlwj = j.next();
+        }
+    }
     return true;
 }
+
+#else
+
+template<class uword>
+bool EWAHBoolArray<uword>::operator==(const EWAHBoolArray & x) const {
+    EWAHBoolArrayRawIterator<uword> i = x.raw_iterator();
+    EWAHBoolArrayRawIterator<uword> j = raw_iterator();
+    if (!(i.hasNext() and j.hasNext())) {// hopefully this never happens...
+        return true;
+    }
+    // at this point, this should be safe:
+    BufferedRunningLengthWord<uword> & rlwi = i.next();
+    BufferedRunningLengthWord<uword> & rlwj = j.next();
+
+
+    while ((rlwi.size() > 0) && (rlwj.size() > 0)) {
+        while ((rlwi.getRunningLength() > 0) || (rlwj.getRunningLength() > 0)) {
+            const bool i_is_prey = rlwi.getRunningLength() < rlwj .getRunningLength();
+            BufferedRunningLengthWord<uword> & prey = i_is_prey ? rlwi : rlwj;
+            BufferedRunningLengthWord<uword> & predator = i_is_prey ? rlwj : rlwi;
+            size_t index = 0;
+            const bool nonzero = ((!predator.getRunningBit()) ? prey.nonzero_discharge(
+                    predator.getRunningLength(),index) : prey.nonzero_dischargeNegated(
+                    predator.getRunningLength(),index));
+            if(nonzero) {
+            	return false;
+            }
+            if(predator.getRunningLength() - index > 0) {
+            	if(predator.getRunningBit()) {
+            		return false;
+            	}
+            }
+            predator.discardRunningWordsWithReload();
+
+        }
+        const size_t nbre_literal = min(rlwi.getNumberOfLiteralWords(),rlwj.getNumberOfLiteralWords());
+        if (nbre_literal > 0) {
+            for (size_t k = 0; k < nbre_literal; ++k)
+                if((rlwi.getLiteralWordAt(k) ^ rlwj.getLiteralWordAt(k))!=0) return false;
+            rlwi.discardFirstWordsWithReload(nbre_literal);
+            rlwj.discardFirstWordsWithReload(nbre_literal);
+        }
+    }
+    const bool i_remains = rlwi.size() > 0;
+    BufferedRunningLengthWord<uword> & remaining = i_remains ? rlwi : rlwj;
+    return !remaining.nonzero_discharge();
+}
+
+#endif
 
 template<class uword>
 void EWAHBoolArray<uword>::swap(EWAHBoolArray & x) {
@@ -1141,7 +1293,9 @@ void EWAHBoolArray<uword>::append(const EWAHBoolArray & x) {
                 == 0)) {
             // it could be that the running length word is empty, in such a case,
             // we want to get rid of it!
+#ifdef EWAHASSERT
             assert(lastRLW == buffer.size() - 1);
+#endif
             lastRLW = x.lastRLW + buffer.size() - 1;
             buffer.resize(buffer.size() - 1);
             buffer.insert(buffer.end(), x.buffer.begin(), x.buffer.end());
@@ -1184,9 +1338,13 @@ void EWAHBoolArrayIterator<uword>::readNewRunningLengthWord() {
             ++pointer;
             readNewRunningLengthWord();
         } else {
+#ifdef EWAHASSERT
             assert(pointer >= myparent.size() - 1);
+#endif
             pointer = myparent.size();
+#ifdef EWAHASSERT
             assert(!hasNext());
+#endif
         }
     }
 }
@@ -1362,9 +1520,11 @@ size_t EWAHBoolArray<uword>::addStreamOfDirtyWords(const uword * v,
     RunningLengthWord<uword> lastRunningLengthWord(buffer[lastRLW]);
     const uword NumberOfLiteralWords =
             lastRunningLengthWord.getNumberOfLiteralWords();
+#ifdef EWAHASSERT
     assert(
             RunningLengthWord<uword>::largestliteralcount
                     >= NumberOfLiteralWords);
+#endif
     const size_t
             whatwecanadd =
                     number
@@ -1372,15 +1532,19 @@ size_t EWAHBoolArray<uword>::addStreamOfDirtyWords(const uword * v,
                                     - NumberOfLiteralWords) ? number
                             : static_cast<size_t> (RunningLengthWord<uword>::largestliteralcount
                                     - NumberOfLiteralWords);//0x7FFF-NumberOfLiteralWords);
+#ifdef EWAHASSERT
     assert(NumberOfLiteralWords + whatwecanadd >= NumberOfLiteralWords);
     assert(
             NumberOfLiteralWords + whatwecanadd
                     <= RunningLengthWord<uword>::largestliteralcount);
+#endif
     lastRunningLengthWord.setNumberOfLiteralWords(
             static_cast<uword> (NumberOfLiteralWords + whatwecanadd));
+#ifdef EWAHASSERT
     assert(
             lastRunningLengthWord.getNumberOfLiteralWords()
                     == NumberOfLiteralWords + whatwecanadd);
+#endif
     const size_t leftovernumber = number - whatwecanadd;
     // add the dirty words...
     const size_t oldsize(buffer.size());
@@ -1395,11 +1559,67 @@ size_t EWAHBoolArray<uword>::addStreamOfDirtyWords(const uword * v,
         ++wordsadded;
         wordsadded += addStreamOfDirtyWords(v + whatwecanadd, leftovernumber);
     }
+#ifdef EWAHASSERT
     assert(wordsadded >= number);
+#endif
     return wordsadded;
 }
 
-
+template<class uword>
+size_t EWAHBoolArray<uword>::addStreamOfNegatedDirtyWords(const uword * v,
+        const size_t number) {
+    if (number == 0)
+        return 0;
+    RunningLengthWord<uword> lastRunningLengthWord(buffer[lastRLW]);
+    const uword NumberOfLiteralWords =
+            lastRunningLengthWord.getNumberOfLiteralWords();
+#ifdef EWAHASSERT
+    assert(
+            RunningLengthWord<uword>::largestliteralcount
+                    >= NumberOfLiteralWords);
+#endif
+    const size_t
+            whatwecanadd =
+                    number
+                            < static_cast<uword> (RunningLengthWord<uword>::largestliteralcount
+                                    - NumberOfLiteralWords) ? number
+                            : static_cast<size_t> (RunningLengthWord<uword>::largestliteralcount
+                                    - NumberOfLiteralWords);//0x7FFF-NumberOfLiteralWords);
+#ifdef EWAHASSERT
+    assert(NumberOfLiteralWords + whatwecanadd >= NumberOfLiteralWords);
+    assert(
+            NumberOfLiteralWords + whatwecanadd
+                    <= RunningLengthWord<uword>::largestliteralcount);
+#endif
+    lastRunningLengthWord.setNumberOfLiteralWords(
+            static_cast<uword> (NumberOfLiteralWords + whatwecanadd));
+#ifdef EWAHASSERT
+    assert(
+            lastRunningLengthWord.getNumberOfLiteralWords()
+                    == NumberOfLiteralWords + whatwecanadd);
+#endif
+    const size_t leftovernumber = number - whatwecanadd;
+    // add the dirty words...
+    const size_t oldsize(buffer.size());
+    buffer.resize(oldsize + whatwecanadd);
+    for(size_t k = 0; k <whatwecanadd; ++k) {
+    	buffer[oldsize + k] = ~v[k];
+    }
+    //memcpy(&buffer[oldsize], v, whatwecanadd * sizeof(uword));
+	sizeinbits += whatwecanadd * wordinbits;
+    size_t wordsadded(whatwecanadd);
+    if (leftovernumber > 0) {
+        //add
+        buffer.push_back(0);
+        lastRLW = buffer.size() - 1;
+        ++wordsadded;
+        wordsadded += addStreamOfDirtyWords(v + whatwecanadd, leftovernumber);
+    }
+#ifdef EWAHASSERT
+    assert(wordsadded >= number);
+#endif
+    return wordsadded;
+}
 
 template<class uword>
 size_t EWAHBoolArray<uword>::addEmptyWord(const bool v) {
@@ -1411,36 +1631,48 @@ size_t EWAHBoolArray<uword>::addEmptyWord(const bool v) {
     uword runlen = lastRunningLengthWord.getRunningLength();
     if ((noliteralword) && (runlen == 0)) {
         lastRunningLengthWord.setRunningBit(v);
+#ifdef EWAHASSERT
         assert(lastRunningLengthWord.getRunningBit() == v);
+#endif
     }
     if ((noliteralword) && (lastRunningLengthWord.getRunningBit() == v)
             && (runlen < RunningLengthWord<uword>::largestrunninglengthcount)) {
         lastRunningLengthWord.setRunningLength(static_cast<uword> (runlen + 1));
+#ifdef EWAHASSERT
         assert(lastRunningLengthWord.getRunningLength() == runlen + 1);
+#endif
         return 0;
     } else {
         // we have to start anew
         buffer.push_back(0);
         lastRLW = buffer.size() - 1;
         RunningLengthWord<uword> lastRunningLengthWord2(buffer[lastRLW]);
+#ifdef EWAHASSERT
         assert(lastRunningLengthWord2.getRunningLength() == 0);
         assert(lastRunningLengthWord2.getRunningBit() == 0);
         assert(lastRunningLengthWord2.getNumberOfLiteralWords() == 0);
+#endif
         lastRunningLengthWord2.setRunningBit(v);
+#ifdef EWAHASSERT
         assert(lastRunningLengthWord2.getRunningBit() == v);
+#endif
         lastRunningLengthWord2.setRunningLength(1);
+#ifdef EWAHASSERT
         assert(lastRunningLengthWord2.getRunningLength() == 1);
         assert(lastRunningLengthWord2.getNumberOfLiteralWords() == 0);
+#endif
         return 1;
     }
 }
+
+
+#ifndef JAVAVERSION
+
 template<class uword>
-void EWAHBoolArray<uword>::logicalor(EWAHBoolArray &a, EWAHBoolArray &container) {
-    makeSameSize(a);
+void EWAHBoolArray<uword>::logicalor(const EWAHBoolArray &a, EWAHBoolArray &container) const {
     container.reset();
     if (RESERVEMEMORY)
         container.buffer.reserve(buffer.size() + a.buffer.size());
-    assert(sizeInBits() == a.sizeInBits());
     EWAHBoolArrayRawIterator<uword> i = a.raw_iterator();
     EWAHBoolArrayRawIterator<uword> j = raw_iterator();
     if (!(i.hasNext() and j.hasNext())) {// hopefully this never happens...
@@ -1509,11 +1741,15 @@ void EWAHBoolArray<uword>::logicalor(EWAHBoolArray &a, EWAHBoolArray &container)
                         static_cast<size_t> (tobediscarded));
             }
         }
+#ifdef EWAHASSERT
         assert(prey.getRunningLength() == 0);
+#endif
         // all that is left to do now is to AND the dirty words
         uword nbre_dirty_prey(prey.getNumberOfLiteralWords());
         if (nbre_dirty_prey > 0) {
+#ifdef EWAHASSERT
             assert(predator.getRunningLength() == 0);
+#endif
             const uword * idirty = i.dirtyWords();
             const uword * jdirty = j.dirtyWords();
             for (uword k = 0; k < nbre_dirty_prey; ++k) {
@@ -1534,13 +1770,13 @@ void EWAHBoolArray<uword>::logicalor(EWAHBoolArray &a, EWAHBoolArray &container)
     container.setSizeInBits(sizeInBits());
 }
 
+
+
 template<class uword>
-void EWAHBoolArray<uword>::logicalxor(EWAHBoolArray &a, EWAHBoolArray &container) {
-    makeSameSize(a);
+void EWAHBoolArray<uword>::logicalxor(const EWAHBoolArray &a, EWAHBoolArray &container) const {
     container.reset();
     if (RESERVEMEMORY)
         container.buffer.reserve(buffer.size() + a.buffer.size());
-    assert(sizeInBits() == a.sizeInBits());
     EWAHBoolArrayRawIterator<uword> i = a.raw_iterator();
     EWAHBoolArrayRawIterator<uword> j = raw_iterator();
     if (!(i.hasNext() and j.hasNext())) {// hopefully this never happens...
@@ -1563,7 +1799,9 @@ void EWAHBoolArray<uword>::logicalxor(EWAHBoolArray &a, EWAHBoolArray &container
 					prey.getRunningBit() ^ predator.getRunningBit(),
 					static_cast<size_t> (tobediscarded));
 		} else {
+#ifdef EWAHASSERT
 			assert(predatorrl<preyrl);
+#endif
 			const uword tobediscarded = predatorrl;
 			if(predatorrl>0) {
 				container.addStreamOfEmptyWords(
@@ -1606,11 +1844,15 @@ void EWAHBoolArray<uword>::logicalxor(EWAHBoolArray &a, EWAHBoolArray &container
 				prey.discardFirstWords(tobediscarded);
 			}
 		}
+#ifdef EWAHASSERT
 		assert(prey.getRunningLength() == 0);
-        // all that is left to do now is to AND the dirty words
+#endif
+		// all that is left to do now is to AND the dirty words
         uword nbre_dirty_prey(prey.getNumberOfLiteralWords());
         if (nbre_dirty_prey > 0) {
+#ifdef EWAHASSERT
             assert(predator.getRunningLength() == 0);
+#endif
             const uword * idirty = i.dirtyWords();
             const uword * jdirty = j.dirtyWords();
 
@@ -1633,16 +1875,13 @@ void EWAHBoolArray<uword>::logicalxor(EWAHBoolArray &a, EWAHBoolArray &container
 }
 
 
+#else // JAVAVERSION
+
 template<class uword>
-void EWAHBoolArray<uword>::logicaland(EWAHBoolArray &a,
-        EWAHBoolArray &container) {
-    makeSameSize(a);
+void EWAHBoolArray<uword>::logicalor(const EWAHBoolArray &a, EWAHBoolArray &container) const {
     container.reset();
     if (RESERVEMEMORY)
-        container.buffer.reserve(
-                buffer.size() > a.buffer.size() ? buffer.size()
-                        : a.buffer.size());
-    assert(sizeInBits() == a.sizeInBits());
+        container.buffer.reserve(buffer.size() + a.buffer.size());
     EWAHBoolArrayRawIterator<uword> i = a.raw_iterator();
     EWAHBoolArrayRawIterator<uword> j = raw_iterator();
     if (!(i.hasNext() and j.hasNext())) {// hopefully this never happens...
@@ -1652,23 +1891,160 @@ void EWAHBoolArray<uword>::logicaland(EWAHBoolArray &a,
     // at this point, this should be safe:
     BufferedRunningLengthWord<uword> & rlwi = i.next();
     BufferedRunningLengthWord<uword> & rlwj = j.next();
+
+    while ((rlwi.size() > 0) && (rlwj.size() > 0)) {
+        while ((rlwi.getRunningLength() > 0)
+                || (rlwj.getRunningLength() > 0)) {
+            const bool i_is_prey = rlwi
+                    .getRunningLength() < rlwj
+                    .getRunningLength();
+            BufferedRunningLengthWord<uword> & prey = i_is_prey ? rlwi
+                    : rlwj;
+            BufferedRunningLengthWord<uword> & predator = i_is_prey ? rlwj
+                    : rlwi;
+            if (predator.getRunningBit()) {
+                container.addStreamOfEmptyWords(true,
+                        predator.getRunningLength());
+                prey.discardFirstWordsWithReload(predator
+                        .getRunningLength());
+            } else {
+                const size_t index = prey.discharge(container,
+                        predator.getRunningLength());
+                container.addStreamOfEmptyWords(false,
+                        predator.getRunningLength()
+                                - index
+                );
+            }
+            predator.discardRunningWordsWithReload();
+        }
+        const size_t nbre_literal = min(
+                rlwi.getNumberOfLiteralWords(),
+                rlwj.getNumberOfLiteralWords());
+        if (nbre_literal > 0) {
+            for (size_t k = 0; k < nbre_literal; ++k) {
+                container.addWord(rlwi.getLiteralWordAt(k)
+                        | rlwj.getLiteralWordAt(k));
+            }
+            rlwi.discardFirstWordsWithReload(nbre_literal);
+            rlwj.discardFirstWordsWithReload(nbre_literal);
+        }
+    }
+    const bool  i_remains = rlwi.size() > 0;
+    BufferedRunningLengthWord<uword> &  remaining = i_remains ? rlwi
+            : rlwj;
+    remaining.discharge(container);
+
+}
+
+template<class uword>
+void EWAHBoolArray<uword>::logicalxor(const EWAHBoolArray &a, EWAHBoolArray &container) const {
+    container.reset();
+    if (RESERVEMEMORY)
+        container.buffer.reserve(buffer.size() + a.buffer.size());
+    EWAHBoolArrayRawIterator<uword> i = a.raw_iterator();
+    EWAHBoolArrayRawIterator<uword> j = raw_iterator();
+    if (!(i.hasNext() and j.hasNext())) {// hopefully this never happens...
+        container.setSizeInBits(sizeInBits());
+        return;
+    }
+    // at this point, this should be safe:
+    BufferedRunningLengthWord<uword> & rlwi = i.next();
+    BufferedRunningLengthWord<uword> & rlwj = j.next();
+
+
+    while ((rlwi.size() > 0) && (rlwj.size() > 0)) {
+        while ((rlwi.getRunningLength() > 0) || (rlwj.getRunningLength() > 0)) {
+            const bool i_is_prey = rlwi.getRunningLength() < rlwj .getRunningLength();
+            BufferedRunningLengthWord<uword> & prey = i_is_prey ? rlwi : rlwj;
+            BufferedRunningLengthWord<uword> & predator = i_is_prey ? rlwj : rlwi;
+            const size_t index = (!predator.getRunningBit()) ? prey.discharge(container,
+                    predator.getRunningLength()) : prey.dischargeNegated(container,
+                    predator.getRunningLength());
+            container.addStreamOfEmptyWords(predator.getRunningBit(), predator.getRunningLength() - index);
+            predator.discardRunningWordsWithReload();
+        }
+        const size_t nbre_literal = min(rlwi.getNumberOfLiteralWords(),rlwj.getNumberOfLiteralWords());
+        if (nbre_literal > 0) {
+            for (size_t k = 0; k < nbre_literal; ++k)
+                container.addWord(rlwi.getLiteralWordAt(k) ^ rlwj.getLiteralWordAt(k));
+            rlwi.discardFirstWordsWithReload(nbre_literal);
+            rlwj.discardFirstWordsWithReload(nbre_literal);
+        }
+    }
+    const bool i_remains = rlwi.size() > 0;
+    BufferedRunningLengthWord<uword> & remaining = i_remains ? rlwi : rlwj;
+    remaining.discharge(container);
+   /// container.setSizeInBitsWithinLastWord(Math.max(sizeInBits(), a.sizeInBits()));
+}
+
+
+#endif //JAVAVERSION
+
+
+
+template<class uword>
+void EWAHBoolArray<uword>::logicaland(const EWAHBoolArray &a,
+        EWAHBoolArray &container) const {
+    container.reset();
+    if (RESERVEMEMORY)
+        container.buffer.reserve(
+                buffer.size() > a.buffer.size() ? buffer.size()
+                        : a.buffer.size());
+    EWAHBoolArrayRawIterator<uword> i = a.raw_iterator();
+    EWAHBoolArrayRawIterator<uword> j = raw_iterator();
+    if (!(i.hasNext() and j.hasNext())) {// hopefully this never happens...
+        container.setSizeInBits(sizeInBits());
+        return;
+    }
+    // at this point, this should be safe:
+    BufferedRunningLengthWord<uword> & rlwi = i.next();
+    BufferedRunningLengthWord<uword> & rlwj = j.next();
+
+    while ((rlwi.size() > 0) && (rlwj.size() > 0)) {
+        while ((rlwi.getRunningLength() > 0)
+                || (rlwj.getRunningLength() > 0)) {
+        	const bool i_is_prey = rlwi.getRunningLength() < rlwj.getRunningLength();
+            BufferedRunningLengthWord<uword> & prey(i_is_prey ? rlwi : rlwj);
+            BufferedRunningLengthWord<uword> & predator(i_is_prey ? rlwj : rlwi);
+            if (!predator.getRunningBit()) {
+            	container.fastaddStreamOfEmptyWords(false, predator.getRunningLength());
+                prey.discardFirstWordsWithReload(predator.getRunningLength());
+            } else {
+            	const size_t index = prey.discharge(container, predator.getRunningLength());
+            	container.fastaddStreamOfEmptyWords(false, predator.getRunningLength() - index);
+            }
+            predator.discardRunningWordsWithReload();
+        }
+        const size_t nbre_literal = min(rlwi.getNumberOfLiteralWords(), rlwj.getNumberOfLiteralWords());
+        if (nbre_literal > 0) {
+            for (size_t k = 0; k < nbre_literal; ++k) {
+                container.addWord(rlwi.getLiteralWordAt(k) & rlwj.getLiteralWordAt(k));
+            }
+            rlwi.discardFirstWordsWithReload(nbre_literal);
+            rlwj.discardFirstWordsWithReload(nbre_literal);
+        }
+    }
     //RunningLength;
-    while (true) {
+/*    while (true) {
         bool i_is_prey(rlwi.size() < rlwj.size());
         BufferedRunningLengthWord<uword> & prey(i_is_prey ? rlwi : rlwj);
         BufferedRunningLengthWord<uword> & predator(i_is_prey ? rlwj : rlwi);
+
+
+
+
         if (prey.getRunningBit() == 0) {
             const uword preyrl(prey.getRunningLength());
             predator.discardFirstWords(preyrl);
             prey.discardFirstWords(preyrl);
-            container.addStreamOfEmptyWords(0, static_cast<size_t> (preyrl));
+            if(preyrl>0) container.fastaddStreamOfEmptyWords(0, static_cast<size_t> (preyrl));
         } else {
             // we have a stream of 1x11
             const uword predatorrl(predator.getRunningLength());
             const uword preyrl(prey.getRunningLength());
             const uword tobediscarded = (predatorrl >= preyrl) ? preyrl
                     : predatorrl;
-            container.addStreamOfEmptyWords(predator.getRunningBit(),
+            if(tobediscarded>0) container.fastaddStreamOfEmptyWords(predator.getRunningBit(),
                     static_cast<size_t> (tobediscarded));
             if (preyrl - tobediscarded > 0) {
                 const uword * dw_predator(
@@ -1688,7 +2064,7 @@ void EWAHBoolArray<uword>::logicaland(EWAHBoolArray &a,
                                 : predatorrl;
                 predator.discardFirstWords(tobediscarded);
                 prey.discardFirstWords(tobediscarded);
-                container.addStreamOfEmptyWords(0,
+                if(tobediscarded>0) container.fastaddStreamOfEmptyWords(0,
                         static_cast<size_t> (tobediscarded));
             } else {
                 const uword nbre_dirty_prey(prey.getNumberOfLiteralWords());
@@ -1705,11 +2081,15 @@ void EWAHBoolArray<uword>::logicaland(EWAHBoolArray &a,
                 }
             }
         }
+#ifdef EWAHASSERT
         assert(prey.getRunningLength() == 0);
+#endif
         // all that is left to do now is to AND the dirty words
         uword nbre_dirty_prey(prey.getNumberOfLiteralWords());
         if (nbre_dirty_prey > 0) {
+#ifdef EWAHASSERT
             assert(predator.getRunningLength() == 0);
+#endif
             const uword * idirty = i.dirtyWords();
             const uword * jdirty = j.dirtyWords();
             for (uword k = 0; k < nbre_dirty_prey; ++k) {
@@ -1726,13 +2106,13 @@ void EWAHBoolArray<uword>::logicaland(EWAHBoolArray &a,
                 break;
             rlwj = j.next();
         }
-    }
+    }*/
     container.setSizeInBits(sizeInBits());
 }
 
 
 template<class uword>
-bool EWAHBoolArray<uword>::intersects(EWAHBoolArray &a) {
+bool EWAHBoolArray<uword>::intersects(const EWAHBoolArray &a) const {
     EWAHBoolArrayRawIterator<uword> i = a.raw_iterator();
     EWAHBoolArrayRawIterator<uword> j = raw_iterator();
     // at this point, this should be safe:
@@ -1747,8 +2127,8 @@ bool EWAHBoolArray<uword>::intersects(EWAHBoolArray &a) {
         BufferedRunningLengthWord<uword> & predator(i_is_prey ? rlwj : rlwi);
         if (prey.getRunningBit() == 0) {
             const uword preyrl(prey.getRunningLength());
-            predator.discardFirstWords(preyrl);
-            prey.discardFirstWords(preyrl);
+            predator.discardFirstWordsWithReload(preyrl);
+            prey.discardFirstWordsWithReload(preyrl);
         } else {
             // we have a stream of 1x11
             const uword predatorrl(predator.getRunningLength());
@@ -1759,8 +2139,8 @@ bool EWAHBoolArray<uword>::intersects(EWAHBoolArray &a) {
             if (preyrl - tobediscarded > 0) {
               return true;
             }
-            predator.discardFirstWords(preyrl);
-            prey.discardFirstWords(preyrl);
+            predator.discardFirstWordsWithReload(preyrl);
+            prey.discardFirstWordsWithReload(preyrl);
         }
         const uword predatorrl(predator.getRunningLength());
         if (predatorrl > 0) {
@@ -1769,8 +2149,8 @@ bool EWAHBoolArray<uword>::intersects(EWAHBoolArray &a) {
                 const uword tobediscarded =
                         (predatorrl >= nbre_dirty_prey) ? nbre_dirty_prey
                                 : predatorrl;
-                predator.discardFirstWords(tobediscarded);
-                prey.discardFirstWords(tobediscarded);
+                predator.discardFirstWordsWithReload(tobediscarded);
+                prey.discardFirstWordsWithReload(tobediscarded);
             } else {
                 const uword nbre_dirty_prey(prey.getNumberOfLiteralWords());
                 const uword tobediscarded =
@@ -1781,17 +2161,21 @@ bool EWAHBoolArray<uword>::intersects(EWAHBoolArray &a) {
                 }
             }
         }
+#ifdef EWAHASSERT
         assert(prey.getRunningLength() == 0);
+#endif
         // all that is left to do now is to AND the dirty words
         uword nbre_dirty_prey(prey.getNumberOfLiteralWords());
         if (nbre_dirty_prey > 0) {
+#ifdef EWAHASSERT
             assert(predator.getRunningLength() == 0);
+#endif
             const uword * idirty = i.dirtyWords();
             const uword * jdirty = j.dirtyWords();
             for (uword k = 0; k < nbre_dirty_prey; ++k) {
               if(static_cast<uword>(idirty[k] & jdirty[k])!=0) return true;
             }
-            predator.discardFirstWords(nbre_dirty_prey);
+            predator.discardFirstWordsWithReload(nbre_dirty_prey);
         }
         if (i_is_prey) {
             if (!i.hasNext())
@@ -1839,7 +2223,6 @@ void EWAHBoolArray<uword>::debugprintout() const {
         for (uword j = 0; j < lw; ++j) {
             const uword & w = buffer[pointer + j + 1];
             cout << toBinaryString(w) << endl;
-            ;
         }
         pointer += lw + 1;
     }
