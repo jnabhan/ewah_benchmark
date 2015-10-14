@@ -31,15 +31,15 @@ public:
 	static EWAHBoolArray<uint64_t>* readOneBitmap(ifstream* inputStream) {
 		EWAHBoolArray<uint64_t>* ewah = new EWAHBoolArray<uint64_t>;
 
-		unsigned long sizeInBits = 0;
+		uint32_t sizeInBits = 0;
 		inputStream->read((char *)&sizeInBits, 4);
 		sizeInBits = swapBytesIfNecessary(sizeInBits);
 
-		unsigned long numberOfOnes = 0;
+		uint32_t numberOfOnes = 0;
 		inputStream->read((char *)&numberOfOnes, 4);
 		numberOfOnes = swapBytesIfNecessary(numberOfOnes);
 
-		unsigned long tmp = 0;
+		uint32_t tmp = 0;
 		for (unsigned long i = 0; i<numberOfOnes; ++i) {
 			inputStream->read((char *)&tmp, 4);
 			tmp = swapBytesIfNecessary(tmp);
@@ -50,7 +50,7 @@ public:
 		return ewah;
 	}
 private:
-	static int swapBytesIfNecessary(int num) {
+	static uint32_t swapBytesIfNecessary(uint32_t num) {
 		int i = 1;
 		if (*(char *)&i == 1) {
 			// little endian machine
@@ -64,4 +64,3 @@ private:
 		}
 	}
 };
-

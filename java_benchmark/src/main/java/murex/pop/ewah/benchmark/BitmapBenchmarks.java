@@ -38,8 +38,14 @@ public class BitmapBenchmarks {
    }
 
    @Benchmark
-   public EWAHCompressedBitmap bitmap_benchmark() {
+   public EWAHCompressedBitmap bitmap_benchmark_and() {
       ewahs[0].andToContainer(ewahs[1], container);
+      return container;
+   }
+
+   @Benchmark
+   public EWAHCompressedBitmap bitmap_benchmark_or() {
+      ewahs[0].orToContainer(ewahs[1], container);
       return container;
    }
 
