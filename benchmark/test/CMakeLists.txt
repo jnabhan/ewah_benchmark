@@ -12,8 +12,17 @@ macro(compile_benchmark_test name)
 endmacro(compile_benchmark_test)
 
 # Demonstration executable
-compile_benchmark_test(ewah_test)
-add_test(ewah_test ewah_test --benchmark_min_time=0.01)
+compile_benchmark_test(ewah_test_and)
+add_test(ewah_test_and ewah_test_and --benchmark_min_time=0.01)
+
+compile_benchmark_test(ewah_test_or)
+add_test(ewah_test_or ewah_test_or --benchmark_min_time=0.01)
+
+compile_benchmark_test(ewah_test_iterator)
+add_test(ewah_test_iterator ewah_test_iterator --benchmark_min_time=0.01)
+
+compile_benchmark_test(ewah_test_iterator_access_sum)
+add_test(ewah_test_iterator_access_sum ewah_test_iterator_access_sum --benchmark_min_time=0.01)
 
 # Add the coverage command(s)
 if(CMAKE_BUILD_TYPE)

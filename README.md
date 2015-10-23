@@ -8,7 +8,10 @@ from ./benchmark<br/>
 
 ###To run the benchmarks###
 from ./benchmark/Release (necessary because of hard-coded path for bitmaps)<br/>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;./test/ewah_test<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;./test/ewah_test_and<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;./test/ewah_test_or<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;./test/ewah_test_iterator<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;./test/ewah_test_iterator_access_sum<br/>
 
 ##Java##
 ###To build the benchmark project###
@@ -17,7 +20,12 @@ from ./java_benchmark<br/>
 
 ###To run the benchmarks###
 from ./java_benchmark<br/>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;java -cp target/benchmarks.jar murex.pop.ewah.benchmark.BitmapBenchmarks
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;java -cp target/benchmarks.jar murex.pop.ewah.benchmark.EWAHBenchmarks and<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;java -cp target/benchmarks.jar murex.pop.ewah.benchmark.EWAHBenchmarks or<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;java -cp target/benchmarks.jar murex.pop.ewah.benchmark.EWAHBenchmarks iterator<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;java -cp target/benchmarks.jar murex.pop.ewah.benchmark.EWAHBenchmarks iterator_access_sum<br/>
+or to run all tests (takes very long)<br/>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;java -cp target/benchmarks.jar murex.pop.ewah.benchmark.EWAHBenchmarks<br/>
 
 ##dump_files##
 Each dump file contains two bitmaps written consecutively in the following manner<br/>
